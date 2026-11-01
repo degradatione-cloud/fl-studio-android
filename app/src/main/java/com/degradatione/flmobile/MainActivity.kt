@@ -105,6 +105,7 @@ fun FlTheme(content: @Composable () -> Unit) {
     )
 }
 
+@OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
 @Composable
 fun FlApp(pattern: Pattern, player: Player, prefs: android.content.SharedPreferences) {
     val ctx = LocalContext.current
