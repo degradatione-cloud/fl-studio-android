@@ -12,8 +12,8 @@ android {
         applicationId = "com.degradatione.flmobile"
         minSdk = 35
         targetSdk = 36
-        versionCode = 10
-        versionName = "0.1.0"
+        versionCode = 20
+        versionName = "0.2.0"
         resourceConfigurations += listOf("en", "ru")
     }
 
