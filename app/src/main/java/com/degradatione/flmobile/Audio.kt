@@ -110,8 +110,12 @@ class Voice {
     }
 
     fun next(sr: Double): Double {
-        if (env <= 0.0008) return 0.0
         val dt = 1.0 / sr
+        // огибающая считается ДО проверки — иначе голос не может «завестись» из нуля
+        val atk = patch.attack.coerceIn(0.001f, 0.4f).toDouble()
+        env = if (t < atk) t / atk else exp(-(t - atk) / (patch.decay.coerceIn(0.03f, 1.6f).toDouble() * 0.45))
+        t += dt
+        if (env <= 0.0008) return 0.0
         var f = baseFreq()
 
         // характер барабанов
@@ -165,10 +169,6 @@ class Voice {
             out = (out * levels).roundToInt() / levels
         }
 
-        // огибающая: атака + экспоненциальный спад
-        val atk = patch.attack.coerceIn(0.001f, 0.4f).toDouble()
-        env = if (t < atk) t / atk else exp(-(t - atk) / (patch.decay.coerceIn(0.03f, 1.6f).toDouble() * 0.45))
-        t += dt
         return out * env * vel
     }
 }
