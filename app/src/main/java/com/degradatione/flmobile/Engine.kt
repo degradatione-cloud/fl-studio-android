@@ -90,7 +90,6 @@ class Player(val pattern: Pattern) {
         for (t in pattern.tracks) {
             if (!audible(t)) continue
             val v = voices[t.id] ?: continue
-            if (!v.active) continue
             val s = v.next(SR.toDouble()) * t.gain
             val pan = t.pan.coerceIn(-1f, 1f)
             l += s * (1.0 - pan.coerceAtLeast(0f)) * 0.7

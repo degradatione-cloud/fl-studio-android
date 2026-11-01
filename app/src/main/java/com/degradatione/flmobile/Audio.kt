@@ -63,8 +63,8 @@ class Voice {
     private var env = 0.0
     private var t = 0.0
     private var seed = 0x2545F491
-    private var low = 0.0
-    private var band = 0.0
+    private var ic1 = 0.0
+    private var ic2 = 0.0
     private var prevNoise = 0.0
     private var vel = 1.0
 
@@ -86,8 +86,8 @@ class Voice {
         phase3 = 0.0
         env = 0.0
         t = 0.0
-        low = 0.0
-        band = 0.0
+        ic1 = 0.0
+        ic2 = 0.0
     }
 
     val active: Boolean get() = env > 0.0008
@@ -149,14 +149,20 @@ class Voice {
             else -> osc(f)
         }
 
-        // Chamberlin SVF
+        // TPT-фильтр (state variable, топология ZDF) — устойчив при любом резонансе
         val cutoffHz = (60.0 + patch.cutoff.pow(2).toDouble() * 9000.0).coerceIn(60.0, sr * 0.42)
-        val fcoef = 2.0 * sin(PI * min(cutoffHz, sr * 0.42) / sr)
-        val q = 0.35 + patch.res.toDouble() * 6.0
-        low += fcoef * band
-        val high = src - low - q * band
-        band += fcoef * high
-        var out = if (inst == Inst.HAT) high else low
+        val g = kotlin.math.tan(PI * min(cutoffHz, sr * 0.45) / sr)
+        val k = 2.0 - 1.9 * patch.res.toDouble().coerceIn(0.0, 1.0)
+        val a1 = 1.0 / (1.0 + g * (g + k))
+        val a2 = g * a1
+        val a3 = g * a2
+        val v3 = src - ic2
+        val v1 = a1 * ic1 + a2 * v3
+        val v2 = ic2 + a2 * ic1 + a3 * v3
+        ic1 = 2.0 * v1 - ic1
+        ic2 = 2.0 * v2 - ic2
+        val high = src - k * v1 - v2
+        var out = if (inst == Inst.HAT) high else v2
 
         // драйв
         if (patch.drive > 0.001f) {
@@ -169,7 +175,7 @@ class Voice {
             out = (out * levels).roundToInt() / levels
         }
 
-        return out * env * vel
+        return (out * env * vel).coerceIn(-2.0, 2.0)
     }
 }
 
