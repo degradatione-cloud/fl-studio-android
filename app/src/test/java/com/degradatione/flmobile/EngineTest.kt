@@ -41,7 +41,7 @@ class EngineTest {
         val player = Player(p)
         val pcm = player.render(Track.STEPS)
         // 16 шагов по 1/16 при 120 BPM = 4 удара * 0.5 с = 2 с
-        val expectedFrames = (44100 * 60.0 / 120.0 / 4.0 * 16).toInt()
+        val expectedFrames = (44100 * 60 / 120 / 4).toInt() * Track.STEPS
         assertEquals(expectedFrames * 2, pcm.size)
         val peak = pcm.maxOf { kotlin.math.abs(it.toInt()) }
         assertTrue("буфер тихий: peak=$peak", peak > 1000)
@@ -58,7 +58,7 @@ class EngineTest {
 
     @Test
     fun wavHeaderIsValid() {
-        val file = File.createTempFile("fl", ".wav")
+        val file = File.createTempFile("flm", ".wav")
         val pcm = ShortArray(200)
         for (i in pcm.indices) pcm[i] = (i * 3).toShort()
         Wav.write(file, pcm, 44100)
