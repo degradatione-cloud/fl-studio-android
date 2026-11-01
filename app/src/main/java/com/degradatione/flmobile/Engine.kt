@@ -5,8 +5,7 @@ import android.media.AudioFormat
 import android.media.AudioTrack
 import java.io.File
 import java.io.FileOutputStream
-import kotlin.math.PI
-import kotlin.math.sin
+import kotlin.math.abs
 
 /** WAV 16-bit stereo — чтобы экспорт открывался везде. */
 object Wav {
@@ -23,8 +22,8 @@ object Wav {
         out.write("WAVE".toByteArray())
         out.write("fmt ".toByteArray())
         out.write(le32(16))
-        out.write(le16(1))              // PCM
-        out.write(le16(2))              // stereo
+        out.write(le16(1))
+        out.write(le16(2))
         out.write(le32(sampleRate))
         out.write(le32(sampleRate * 2 * 2))
         out.write(le16(4))
@@ -43,53 +42,66 @@ object Wav {
 }
 
 /**
- * Секвенсор: 16 шагов, живые голоса на каждый канал, потоковый AudioTrack.
- * Тот же код умеет рендерить офлайн — для экспорта WAV.
+ * Секвенсор: шаги (до 4 тактов), свинг, акценты, соло, посылы в дилей/реверб.
+ * Тот же код рендерит офлайн — для WAV.
  */
 class Player(val pattern: Pattern) {
 
     companion object {
         const val SR = 44100
-        const val STEPS = Track.STEPS
     }
 
     @Volatile var playing = false
         private set
     @Volatile var currentStep = -1
         private set
+    @Volatile var lastError: String? = null
+
     var onStep: ((Int) -> Unit)? = null
 
     private val voices = HashMap<Int, Voice>()
     private var track: AudioTrack? = null
     private var thread: Thread? = null
+    private val fx = Fx(SR)
 
-    private fun stepSamples(): Int = (SR * 60.0 / pattern.bpm / 4.0).toInt().coerceAtLeast(64)
+    fun stepSamples(): Int = (SR * 60.0 / pattern.bpm / 4.0).toInt().coerceAtLeast(64)
 
     private fun voiceOf(t: Track): Voice = voices.getOrPut(t.id) { Voice() }
+
+    private fun audible(t: Track): Boolean {
+        val soloExists = pattern.tracks.any { it.solo }
+        return if (soloExists) t.solo else !t.mute
+    }
 
     private fun fireStep(step: Int) {
         currentStep = step
         for (t in pattern.tracks) {
-            if (t.mute || !t.steps[step]) continue
-            voiceOf(t).trigger(t.inst, t.pitch, t.decay)
+            if (!audible(t) || !t.steps[step]) continue
+            val vel = if (t.accents[step]) 1f else 0.62f
+            voiceOf(t).trigger(t.inst, t.patch, t.pitch, vel)
         }
         onStep?.invoke(step)
     }
 
-    /** Возвращает пару (L, R) для одного сэмпла. */
     private fun mixSample(): Pair<Double, Double> {
         var l = 0.0
         var r = 0.0
+        var send = 0.0
         for (t in pattern.tracks) {
+            if (!audible(t)) continue
             val v = voices[t.id] ?: continue
             if (!v.active) continue
             val s = v.next(SR.toDouble()) * t.gain
             val pan = t.pan.coerceIn(-1f, 1f)
             l += s * (1.0 - pan.coerceAtLeast(0f)) * 0.7
             r += s * (1.0 + pan.coerceAtMost(0f)) * 0.7
+            send += s * t.patch.send
         }
+        val (wl, wr) = fx.process(send * 0.5, SR)
+        l += wl
+        r += wr
         val m = if (pattern.muted) 0.0 else pattern.master.toDouble()
-        return softClip(l * m * 1.6) to softClip(r * m * 1.6)
+        return softClip(l * m * 1.5) to softClip(r * m * 1.5)
     }
 
     fun start(): Boolean {
@@ -127,15 +139,15 @@ class Player(val pattern: Pattern) {
             val buf = ShortArray(frames * 2)
             var step = 0
             var inStep = 0
-            var stepLen = stepSamples()
             while (playing) {
-                val sl = stepSamples()
-                if (sl != stepLen) stepLen = sl
+                val stepLen = stepSamples()
+                val swingSamples = (stepLen * pattern.swing.coerceIn(0f, 0.6f) * 0.5f).toInt()
                 for (i in 0 until frames) {
                     if (inStep <= 0) {
                         fireStep(step)
-                        step = (step + 1) % STEPS
-                        inStep = stepLen
+                        val swingHere = if (step % 2 == 0) stepLen + swingSamples else stepLen - swingSamples
+                        step = (step + 1) % pattern.steps
+                        inStep = swingHere.coerceAtLeast(32)
                     }
                     val (l, r) = mixSample()
                     buf[i * 2] = (l * 32000).toInt().coerceIn(-32768, 32767).toShort()
@@ -157,8 +169,6 @@ class Player(val pattern: Pattern) {
         return true
     }
 
-    @Volatile var lastError: String? = null
-
     fun stop() {
         playing = false
         thread?.join(400)
@@ -170,7 +180,6 @@ class Player(val pattern: Pattern) {
         voices.clear()
     }
 
-    /** Офлайн-рендер N шагов в стерео-буфер. */
     fun render(steps: Int): ShortArray {
         voices.clear()
         val stepLen = stepSamples()
@@ -181,10 +190,11 @@ class Player(val pattern: Pattern) {
         for (i in 0 until total) {
             if (inStep <= 0) {
                 for (t in pattern.tracks) {
-                    if (t.mute || !t.steps[step]) continue
-                    voiceOf(t).trigger(t.inst, t.pitch, t.decay)
+                    if (!audible(t) || !t.steps[step]) continue
+                    val vel = if (t.accents[step]) 1f else 0.62f
+                    voiceOf(t).trigger(t.inst, t.patch, t.pitch, vel)
                 }
-                step = (step + 1) % STEPS
+                step = (step + 1) % steps
                 inStep = stepLen
             }
             val (l, r) = mixSample()
@@ -196,19 +206,52 @@ class Player(val pattern: Pattern) {
     }
 
     fun exportWav(file: File, bars: Int = 2): File {
-        val pcm = render(STEPS * bars)
+        val actualBars = bars.coerceAtMost(pattern.bars)
+        val pcm = render(pattern.steps * actualBars)
         Wav.write(file, pcm, SR)
         return file
     }
 
-    /** Есть ли вообще звук в паттерне (для подсказок UI). */
-    fun hasAnyStep(): Boolean = pattern.tracks.any { t -> t.steps.any { it } }
+    fun hasAnyStep(): Boolean = pattern.anySteps()
 
-    fun previewNote(t: Track) {
-        val v = Voice()
-        v.trigger(t.inst, t.pitch, t.decay)
-        srcPreview = v
+    /** Короткое прослушивание патча (для листа пресетов). */
+    fun preview(inst: Inst, patch: Patch, pitch: Float = 0f) {
+        runCatching {
+            val n = (SR * 0.7).toInt()
+            val buf = ShortArray(n * 2)
+            val v = Voice()
+            v.trigger(inst, patch, pitch, 1f)
+            for (i in 0 until n) {
+                var s = v.next(SR.toDouble())
+                s = softClip(s * 0.8)
+                buf[i * 2] = (s * 30000).toInt().coerceIn(-32768, 32767).toShort()
+                buf[i * 2 + 1] = (s * 30000).toInt().coerceIn(-32768, 32767).toShort()
+            }
+            val at = AudioTrack.Builder()
+                .setAudioAttributes(
+                    AudioAttributes.Builder()
+                        .setUsage(AudioAttributes.USAGE_MEDIA)
+                        .setContentType(AudioAttributes.CONTENT_TYPE_MUSIC)
+                        .build()
+                )
+                .setAudioFormat(
+                    AudioFormat.Builder()
+                        .setEncoding(AudioFormat.ENCODING_PCM_16BIT)
+                        .setSampleRate(SR)
+                        .setChannelMask(AudioFormat.CHANNEL_OUT_STEREO)
+                        .build()
+                )
+                .setBufferSizeInBytes(buf.size * 2)
+                .setTransferMode(AudioTrack.MODE_STATIC)
+                .build()
+            at.write(buf, 0, buf.size)
+            at.play()
+            Thread {
+                Thread.sleep(900)
+                runCatching { at.stop(); at.release() }
+            }.apply { isDaemon = true }.start()
+        }
     }
 
-    @Volatile private var srcPreview: Voice? = null
+    fun peak(pcm: ShortArray): Int = pcm.maxOfOrNull { abs(it.toInt()) } ?: 0
 }
