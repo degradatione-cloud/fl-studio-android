@@ -77,19 +77,23 @@ import androidx.compose.ui.unit.sp
 import java.io.File
 
 object Fl {
-    val bg = Color(0xFF141416)
-    val panel = Color(0xFF1E1E22)
-    val card = Color(0xFF26262C)
-    val cardHi = Color(0xFF2E2E36)
-    val border = Color(0xFF33333C)
-    val stepOff = Color(0xFF2F2F38)
-    val beat = Color(0xFF41414D)
-    val accent = Color(0xFFFFC464)
-    val orange = Color(0xFFFF9500)
-    val orangeSoft = Color(0xFFFFB74D)
-    val text = Color(0xFFF2F2F5)
-    val dim = Color(0xFFA6A6B2)
-    val faint = Color(0xFF74747F)
+    // тёмная база + янтарь и редкий холодный акцент (Dark Star Labs)
+    val bg = Color(0xFF050507)
+    val panel = Color(0xE60A0A0D)
+    val card = Color(0xEB111116)
+    val cardHi = Color(0xF21A1A21)
+    val border = Color(0xFF262630)
+    val stepOff = Color(0xFF15151B)
+    val beat = Color(0xFF2B2B34)
+    val ember = Color(0xFFFA5D29)
+    val cold = Color(0xFF49B3FC)
+    val accent = Color(0xFFFF9667)
+    val orange = Color(0xFFFA5D29)
+    val orangeSoft = Color(0xFFFF9667)
+    val text = Color(0xFFEDEDED)
+    val dim = Color(0xFF9C9CA6)
+    val faint = Color(0xFF5E5E6A)
+    val mono = androidx.compose.ui.text.font.FontFamily.Monospace
 }
 
 class MainActivity : ComponentActivity() {
@@ -154,6 +158,8 @@ fun FlApp(pattern: Pattern, player: Player, prefs: android.content.SharedPrefere
     BoxWithConstraints(Modifier.fillMaxSize().background(Fl.bg).systemBarsPadding()) {
         val landscape = maxWidth > maxHeight
         val tick = version
+
+        MysticBackdrop(if (playing) activeStep else -1, Modifier.fillMaxSize())
 
         val transport: @Composable () -> Unit = {
             TransportBar(
@@ -327,7 +333,7 @@ private fun TransportBar(
                 )
                 Text(
                     "шаг ${if (activeStep >= 0) activeStep % 16 + 1 else 1}/16 · такт ${activeStep / 16 + 1}/${pattern.bars}",
-                    color = Fl.faint, fontSize = 9.sp,
+                    color = Fl.faint, fontSize = 9.sp, fontFamily = Fl.mono, letterSpacing = 0.4.sp,
                 )
             }
             SoftBtn("Звуки") { onSounds() }
@@ -342,7 +348,10 @@ private fun TransportBar(
                 pattern.bpm = (pattern.bpm - 2f).coerceIn(40f, 240f); onChange()
             }
             Column(Modifier.width(56.dp), horizontalAlignment = Alignment.CenterHorizontally) {
-                Text("${pattern.bpm.toInt()}", color = Fl.text, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text(
+                    "${pattern.bpm.toInt()}", color = Fl.text, fontSize = 15.sp,
+                    fontWeight = FontWeight.Medium, fontFamily = Fl.mono, letterSpacing = (-0.4).sp,
+                )
                 Text("BPM", color = Fl.faint, fontSize = 8.sp)
             }
             SoftBtn("+") {
@@ -649,8 +658,9 @@ private fun StepGrid(track: Track, bar: Int, activeStep: Int, onChange: () -> Un
                 ) {
                     Text(
                         "${step % 16 + 1}",
-                        color = if (on) Color.Black.copy(alpha = 0.6f) else Fl.faint,
+                        color = if (on) Color.Black.copy(alpha = 0.55f) else Fl.faint,
                         fontSize = if (big) 9.sp else 7.5.sp,
+                        fontFamily = Fl.mono,
                     )
                 }
             }
